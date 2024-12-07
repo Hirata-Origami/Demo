@@ -1,0 +1,99 @@
+import json
+
+machines = []
+steps = {}
+wafers = []
+output = {'schedule': []}
+
+class Step:
+    def __init__(self, id, parameters, dependency):
+        self.id = id
+        self.parameters = parameters
+        self.dependency = dependency
+
+class Wafer:
+    def __init__(self, wafer_id, process):
+        self.wafer_id = wafer_id
+        self.process = process
+        self.time = 0
+
+    def assignMachine(self):
+        for step_id, duration in self.process.items():
+            dependency = steps[step_id].dependency
+            if dependency and dependency in self.process:
+                self.waitForMachine(dependency, self.process[dependency])
+            self.waitForMachine(step_id, duration)
+
+    def waitForMachine(self, step_id, duration):
+        while True:
+            for machine in machines:
+                if machine.step == step_id and machine.isAvailable(self.time):
+                    parameters = steps[step_id].parameters
+                    valid = all(parameters[key][0] <= machine.current[key] <= parameters[key][1] for key in parameters)
+
+                    if valid:
+                        start_time = max(self.time, machine.next_available_time)
+                        machine.assignStep(start_time, duration)
+                        output['schedule'].append({
+                            'wafer_id': self.wafer_id,
+                            'step': step_id,
+                            'machine': machine.id,
+                            'start_time': start_time,
+                            'end_time': start_time + duration
+                        })
+                        self.time = start_time + duration
+                        return
+            self.time += 1
+
+class Machine:
+    def __init__(self, id, step, cooldown, initial, fluctuation, n):
+        self.id = id
+        self.step = step
+        self.cooldown = cooldown
+        self.initial = initial
+        self.current = initial.copy()
+        self.fluctuation = fluctuation
+        self.n = n
+        self.current_n = n
+        self.next_available_time = 0
+
+    def isAvailable(self, current_time):
+        return current_time >= self.next_available_time
+
+    def assignStep(self, start_time, duration):
+        self.current_n -= 1
+        for key in self.current:
+            self.current[key] += self.fluctuation[key]
+
+        if self.current_n == 0:
+            self.current_n = self.n
+            self.next_available_time = start_time + duration + self.cooldown
+        else:
+            self.next_available_time = start_time + duration
+
+def main():
+    with open('Input/Milestone0.json', 'r') as file:
+        data = json.load(file)
+
+    for step_data in data['steps']:
+        steps[step_data['id']] = Step(step_data['id'], step_data['parameters'], step_data['dependency'])
+
+    for machine_data in data['machines']:
+        machines.append(Machine(
+            machine_data['machine_id'],
+            machine_data['step_id'],
+            machine_data['cooldown_time'],
+            machine_data['initial_parameters'],
+            machine_data['fluctuation'],
+            machine_data['n']
+        ))
+
+    for wafer_data in data['wafers']:
+        for i in range(1, wafer_data['quantity'] + 1):
+            wafer = Wafer(f"{wafer_data['type']}-{i}", wafer_data['processing_times'])
+            wafers.append(wafer)
+            wafer.assignMachine()
+
+    print(json.dumps(output, indent=2))
+
+main()
